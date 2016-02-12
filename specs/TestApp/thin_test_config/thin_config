@@ -1,0 +1,13 @@
+pid: /home/danabr/projects/rcuke/specs/TestApp/thin_test_config/test_server_pid.pid
+log: /home/danabr/projects/rcuke/specs/TestApp/thin_test_config/test_server_log.log
+rackup: /home/danabr/projects/rcuke/specs/TestApp/config.ru
+max_conns: 1024
+timeout: 30
+port: 7001
+chdir: /home/danabr/projects/rcuke/specs/TestApp
+max_persistent_conns: 512
+environment: development
+servers: 1
+address: 127.0.0.1
+daemonize: true
+require: []

@@ -1,0 +1,141 @@
+#!/usr/bin/env ruby
+require 'optparse'
+
+# TODO: Move to helper file later. Used in spec_helper additionally
+def capture_stdout(&blk)
+  old = $stdout
+  $stdout = fake = StringIO.new
+  blk.call
+  fake.string
+ensure
+  $stdout = old
+end
+
+require_relative '../lib/rcuke/rcuke.rb'
+# require_relative '../lib/rcuke/meta_info.rb'
+
+banner = "Usage: rcuke path/to/features_folder [OPTIONS] [CUCUMBER_OPTIONS]\n" +
+         "Additionally supports most cucumber options, with the exceptions of --out, --format, --version, and --help.\n" +
+         "WARNING: Unintended usage of cucumber options could cause cucumber to fail.\n" +
+         "(ex. cuke's --port and rcuke's --server will conflict).\n\n"
+options = {}
+options[:notification_emails] = []
+
+optparse = OptionParser.new do |opts|
+  opts.banner = banner
+  enable_notifications_message = "Enables email notifications to be sent out. "
+  enable_notifications_message << "Must be comma seperated without whitespace. "
+  enable_notifications_message << "If no emails supplied, it will use the email supplied by git config."
+
+  # TODO: CHANGE ALL LETER TO BE DIFFERENT THAN CUKES. CASE IS IGNORED...........
+  # TODO: WHEN ORDERING, optparser is also duplicating arrays.... need to clone optparse, or reset.
+  opts.on("-S", "--server SERVER_LOCATION",
+          "Server Location. Can be domain or IP address, but must include http protocol (and port if not 80). " + 
+          "Will default to #{$REMOTE_APP_HOST}. Server MUST be running, even locally, unless using -L flag.") do |location|
+    options[:server_location] = location
+  end
+
+  opts.on("-L", "--local-server",
+          "Server is local. Set global boolean switch '$RUN_CUKES_ON_REMOTE_SERVER', triggers remote server configuration, to 'false'." + 
+          "Set '$REMOTE_APP_HOST' to 'nil' (overwrites -S flag).") do |location|
+    options[:remote_server] = false
+  end
+
+  opts.on("-N", "--enable-notifications [EMAIL1,EMAIL2,EMAIL3]", Array, enable_notifications_message) do |emails|
+    options[:enable_notifications] = true
+    if emails
+      emails.each do |email|
+        options[:notification_emails].push(email)
+      end
+    end
+  end
+
+  opts.on("-R", "--retry [TIMES]", "Rerun the tests if any failures. Will default to #{Rcuke::DEFAULT_MAX_RETRIES_ON_FAILURE}.") do |retries|
+    options[:enable_reruns] = true
+    options[:max_rerun_count] = retries.to_i if retries
+  end
+
+  opts.on("-E", "--[no-]embed-screenshots", "Embed screenshots of failed scenarios in the PDF file. Defaults to true.") do |embed_screenshots|
+    options[:embed_screenshots] = embed_screenshots
+  end
+
+  opts.on("-f", "--format FORMAT", "Set the output type to either 'html' or 'pdf'. Defaults to 'pdf'.") do |file_type|
+    if file_type == 'html' || file_type == 'pdf'
+      options[:file_format] = file_type
+    else
+      puts "Error! Invalid option for --format."
+      puts opts
+    end
+  end
+
+  opts.on("-o ", "--outpath/on/disk/<file_name>", "Store file on disk") do |file_path|
+    options[:store_file_on_disk] = file_path
+  end
+
+  opts.on("-C", "--custom-message MESSAGE", "Set custom email subject prefix. Default is 'Cucumber test for SERVER_LOCATION'") do |title|
+    options[:custom_title] = title
+  end
+
+  opts.on("-T", "--test-run", "For testing purposes. Prevents emails from being delivered.") do |run_tests|
+     options[:running_internal_tests] = run_tests
+     puts "WARNING: -T flag used, will NOT deliver emails."
+  end
+
+  opts.on(
+    "-M", "--custom-SMTP-settings path/to/file",
+    "Set SMTP settings to send emails without having to use local SMTP server. " +
+    "Ex. file contents: 'smtp.gmail.com:587 <username@gmail.com>:<password>'"
+  ) do |smtp_path|
+    address, port, email, password = (File.read(smtp_path)).sub(/\n$/, '').split(/[\s+:]/)
+    if address.nil? || port.nil? || email.nil? || password.nil?
+      puts 'Invalid SMTP file contents' if address.nil? || port.nil? || email.nil? || password.nil?
+      exit(-1)
+    else
+      options[:smtp_settings] = {
+        :address              => address,
+        :port                 => port,
+        :user_name            => email,
+        :password             => password
+      }
+    end
+  end
+
+  opts.on("-v", "--[no-]verbose", "Run verbosely") do |v|
+    options[:verbose] = v
+  end
+
+  opts.on( '-h', '--help', 'Display this screen' ) do
+   puts opts
+   exit
+  end
+end
+
+arguments = ARGV.dup
+cucumber_arguments = []
+
+first_run = true
+errors = false
+capture_stdout do
+  while errors || first_run
+    errors = false
+    first_run = false
+    begin
+      optparse.order!(arguments) do |unrecognized_option|
+        cucumber_arguments.push(unrecognized_option)
+      end
+    rescue OptionParser::InvalidOption => e
+      errors = true
+      e.args.each { |arg| cucumber_arguments.push(arg) }
+      arguments.delete(e.args)
+    end
+  end
+end
+
+rcuke_arguments = ARGV.dup
+cucumber_arguments.each do |cuke_arg|
+  rcuke_arguments.delete(cuke_arg)
+end
+
+optparse.parse(rcuke_arguments)
+
+Rcuke::CucumberWrapper::start(cucumber_arguments, options)
